@@ -25,13 +25,31 @@ export const apiRequest = async (endpoint, options = {}) => {
 
   try {
     const response = await fetch(url, config);
-    const data = await response.json();
-    
-    if (!response.ok) {
-      console.error(`[API Error Response]`, data);
-      throw new Error(data.message || 'API request failed');
+    const text = await response.text();
+
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (parseError) {
+      console.warn('[API Response Parsing Warning]: response is not valid JSON', text);
+      data = { message: text || 'No response body' };
     }
-    
+
+    if (!response.ok) {
+      console.error('[API Error Response]:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: data,
+      });
+
+      const errorMessage =
+        (data && typeof data === 'object' && data.message) ||
+        response.statusText ||
+        `API request failed (${response.status})`;
+
+      throw new Error(errorMessage);
+    }
+
     return data;
   } catch (error) {
     console.error('[API Connection Error]:', error.message);

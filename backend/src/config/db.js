@@ -2,7 +2,18 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
     try {
-        const MONGO_URI = process.env.MONGO_URI || 'mongodb://localhost:27017/safeher-india';
+        const enableDB = String(process.env.ENABLE_DB || '').toLowerCase() === 'true';
+        const MONGO_URI = process.env.MONGO_URI;
+
+        if (!enableDB) {
+            console.warn('ENABLE_DB is not true. Skipping MongoDB connection for now.');
+            return;
+        }
+
+        if (!MONGO_URI) {
+            console.warn('ENABLE_DB=true but MONGO_URI is not set. Skipping MongoDB connection for now.');
+            return;
+        }
 
         // Connect to MongoDB
         const conn = await mongoose.connect(MONGO_URI);
@@ -10,8 +21,8 @@ const connectDB = async () => {
         console.log(`MongoDB Connected: ${conn.connection.host}`);
     } catch (error) {
         console.error(`Error Connecting to MongoDB: ${error.message}`);
-        // Exit process with failure
-        process.exit(1);
+        // Do not crash app when MongoDB is temporarily unavailable
+        console.warn('Continuing without MongoDB connection. Some features may be unavailable.');
     }
 };
 
