@@ -2,8 +2,6 @@
 
 <div align="center">
 
-![SafeHer India Banner](https://images.unsplash.com/photo-1596394516093-501ba68a0ba6?auto=format&fit=crop&q=80&w=1200)
-
 ### **"Empowering Every Journey. Your Safety, Our Priority."**
 
 *A women-first safety ecosystem designed for solo female travelers in India. Featuring real-time safety mapping, SOS emergency signals, and a trusted circle of protection.*
