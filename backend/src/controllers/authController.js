@@ -123,8 +123,8 @@ const registerUser = async (req, res, next) => {
             }
         } else {
             // Development mode: Instant mock registration
-            const mockToken = 'mock-token-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
             const mockUserId = 'mock-user-' + email.split('@')[0] + '-' + Date.now();
+            const mockToken = generateToken(mockUserId, email);
             
             const responseData = {
                 token: mockToken,
@@ -214,10 +214,11 @@ const loginUser = async (req, res, next) => {
         } else {
             // Development mode: Instant mock authentication
             // Accept any valid email and password (6+ characters)
-            const mockToken = 'mock-token-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const mockUserId = 'mock-user-' + email.split('@')[0] + '-' + Date.now();
+            const mockToken = generateToken(mockUserId, email);
             const fullName = email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1);
             const mockUser = {
-                userId: 'mock-user-' + email.split('@')[0] + '-' + Date.now(),
+                userId: mockUserId,
                 fullName: fullName,
                 email: email,
                 phone: '9876543210'
