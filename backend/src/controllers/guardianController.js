@@ -1,5 +1,20 @@
 const Guardian = require('../models/Guardian');
 
+const isDBEnabled = String(process.env.ENABLE_DB || '').toLowerCase() === 'true';
+const mockGuardianStore = {};
+
+const normalizePhone = (phone) => {
+    if (!phone) return '';
+    return phone.replace(/\D/g, '');
+};
+
+const getSavedGuardians = (userId) => {
+    if (!mockGuardianStore[userId]) {
+        mockGuardianStore[userId] = [];
+    }
+    return mockGuardianStore[userId];
+};
+
 const addGuardian = async (req, res, next) => {
     try {
         const { guardianName, guardianPhone, relationship } = req.body;
@@ -21,11 +36,11 @@ const addGuardian = async (req, res, next) => {
         }
 
         // Phone validation
-        const phoneRegex = /^\d{10}$/;
-        if (!phoneRegex.test(guardianPhone)) {
+        const normalizedPhone = normalizePhone(guardianPhone);
+        if (normalizedPhone.length < 10 || normalizedPhone.length > 15) {
             return res.status(400).json({
                 success: false,
-                message: 'Phone number must be exactly 10 digits'
+                message: 'Phone number must be between 10 and 15 digits'
             });
         }
 
@@ -38,12 +53,40 @@ const addGuardian = async (req, res, next) => {
             });
         }
 
-        // Check if guardian already exists for this user
-        const existingGuardian = await Guardian.findOne({ 
-            userId: req.user.userId, 
-            guardianPhone 
-        });
-        
+        const userId = req.user.userId;
+
+        if (isDBEnabled) {
+            const existingGuardian = await Guardian.findOne({ 
+                userId, 
+                guardianPhone: normalizedPhone 
+            });
+            
+            if (existingGuardian) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Guardian already added'
+                });
+            }
+
+            const guardian = await Guardian.create({
+                userId,
+                guardianName,
+                guardianPhone: normalizedPhone,
+                relationship,
+                status: 'active',
+                addedAt: Date.now(),
+                isVerified: false
+            });
+
+            return res.status(201).json({ 
+                success: true, 
+                message: 'Guardian added successfully', 
+                data: guardian 
+            });
+        }
+
+        const guardians = getSavedGuardians(userId);
+        const existingGuardian = guardians.find(g => g.guardianPhone === normalizedPhone);
         if (existingGuardian) {
             return res.status(400).json({
                 success: false,
@@ -51,16 +94,17 @@ const addGuardian = async (req, res, next) => {
             });
         }
 
-        // Create Guardian
-        const guardian = await Guardian.create({
-            userId: req.user.userId,
+        const guardian = {
+            _id: `${userId}-${Date.now()}`,
+            userId,
             guardianName,
-            guardianPhone,
+            guardianPhone: normalizedPhone,
             relationship,
             status: 'active',
-            addedAt: Date.now(),
+            addedAt: new Date(),
             isVerified: false
-        });
+        };
+        guardians.push(guardian);
 
         res.status(201).json({ 
             success: true, 
@@ -74,10 +118,21 @@ const addGuardian = async (req, res, next) => {
 
 const getGuardians = async (req, res, next) => {
     try {
-        const guardians = await Guardian.find({ userId: req.user.userId, status: 'active' });
+        const userId = req.user.userId;
+
+        if (isDBEnabled) {
+            const guardians = await Guardian.find({ userId, status: 'active' });
+            return res.status(200).json({ 
+                success: true, 
+                message: 'Guardians retrieved successfully', 
+                data: guardians 
+            });
+        }
+
+        const guardians = getSavedGuardians(userId).filter(g => g.status === 'active');
         res.status(200).json({ 
             success: true, 
-            message: 'Guardians retrieved successfully', 
+            message: 'Guardians retrieved successfully (Development Mode)', 
             data: guardians 
         });
     } catch (err) {
@@ -88,8 +143,29 @@ const getGuardians = async (req, res, next) => {
 const removeGuardian = async (req, res, next) => {
     try {
         const { id } = req.params;
-        const guardian = await Guardian.findOne({ _id: id, userId: req.user.userId });
-        
+        const userId = req.user.userId;
+
+        if (isDBEnabled) {
+            const guardian = await Guardian.findOne({ _id: id, userId });
+            if (!guardian) {
+                return res.status(404).json({
+                    success: false,
+                    message: 'Guardian not found'
+                });
+            }
+
+            guardian.status = 'inactive';
+            await guardian.save();
+
+            return res.status(200).json({ 
+                success: true, 
+                message: 'Guardian removed successfully', 
+                data: {} 
+            });
+        }
+
+        const guardians = getSavedGuardians(userId);
+        const guardian = guardians.find(g => g._id === id);
         if (!guardian) {
             return res.status(404).json({
                 success: false,
@@ -97,10 +173,7 @@ const removeGuardian = async (req, res, next) => {
             });
         }
 
-        // Soft delete: update status to inactive
         guardian.status = 'inactive';
-        await guardian.save();
-
         res.status(200).json({ 
             success: true, 
             message: 'Guardian removed successfully', 
@@ -115,8 +188,17 @@ const updateGuardian = async (req, res, next) => {
     try {
         const { id } = req.params;
         const { guardianName, guardianPhone, relationship } = req.body;
+        const userId = req.user.userId;
 
-        const guardian = await Guardian.findOne({ _id: id, userId: req.user.userId });
+        let guardian;
+
+        if (isDBEnabled) {
+            guardian = await Guardian.findOne({ _id: id, userId });
+        } else {
+            const guardians = getSavedGuardians(userId);
+            guardian = guardians.find(g => g._id === id);
+        }
+
         if (!guardian) {
             return res.status(404).json({
                 success: false,
@@ -124,7 +206,6 @@ const updateGuardian = async (req, res, next) => {
             });
         }
 
-        // Validate and update fields if provided
         if (guardianName) {
             if (guardianName.length < 2 || guardianName.length > 50) {
                 return res.status(400).json({
@@ -136,14 +217,14 @@ const updateGuardian = async (req, res, next) => {
         }
 
         if (guardianPhone) {
-            const phoneRegex = /^\d{10}$/;
-            if (!phoneRegex.test(guardianPhone)) {
+            const normalizedPhone = normalizePhone(guardianPhone);
+            if (normalizedPhone.length < 10 || normalizedPhone.length > 15) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Phone number must be exactly 10 digits'
+                    message: 'Phone number must be between 10 and 15 digits'
                 });
             }
-            guardian.guardianPhone = guardianPhone;
+            guardian.guardianPhone = normalizedPhone;
         }
 
         if (relationship) {
@@ -157,7 +238,9 @@ const updateGuardian = async (req, res, next) => {
             guardian.relationship = relationship;
         }
 
-        await guardian.save();
+        if (isDBEnabled) {
+            await guardian.save();
+        }
 
         res.status(200).json({ 
             success: true, 
