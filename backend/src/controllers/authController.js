@@ -77,67 +77,36 @@ const registerUser = async (req, res, next) => {
             });
         }
 
-        // Try to save to MongoDB if available
-        try {
-            const user = new User({
-                fullName,
-                email,
-                phone,
-                password,
-                termsAcceptedAt: new Date()
-            });
+        // Check if database is enabled
+        const isDBEnabled = String(process.env.ENABLE_DB || '').toLowerCase() === 'true';
 
-            await user.save();
+        if (isDBEnabled) {
+            // Database mode: Save to MongoDB
+            try {
+                const user = new User({
+                    fullName,
+                    email,
+                    phone,
+                    password,
+                    termsAcceptedAt: new Date()
+                });
 
-            const token = generateToken(user._id, user.email);
+                await user.save();
 
-            const responseData = {
-                token: token,
-                user: {
-                    userId: user._id,
-                    fullName: user.fullName,
-                    email: user.email,
-                    phone: user.phone
-                }
-            };
+                const token = generateToken(user._id, user.email);
 
-            if (emergencyContactName && emergencyContactPhone) {
-                responseData.guardian = {
-                    guardianName: emergencyContactName,
-                    guardianPhone: emergencyContactPhone,
-                    relationship: emergencyContactRelationship || 'Other'
-                };
-            }
-
-            res.status(201).json({
-                success: true,
-                message: 'User registered successfully',
-                data: responseData
-            });
-        } catch (dbError) {
-            // If database is not connected, create mock registration
-            if (dbError.message.includes('Cannot read properties') || 
-                dbError.message.includes('save') ||
-                dbError.name === 'MongooseError' ||
-                !process.env.ENABLE_DB || process.env.ENABLE_DB === 'false') {
-                
-                // Development mode: Accept registration with any valid data
-                const mockToken = 'mock-token-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-                const mockUserId = 'mock-user-' + email.split('@')[0] + '-' + Date.now();
-                
                 const responseData = {
-                    token: mockToken,
+                    token: token,
                     user: {
-                        userId: mockUserId,
-                        fullName: fullName,
-                        email: email,
-                        phone: phone
+                        userId: user._id,
+                        fullName: user.fullName,
+                        email: user.email,
+                        phone: user.phone
                     }
                 };
 
                 if (emergencyContactName && emergencyContactPhone) {
                     responseData.guardian = {
-                        guardianId: 'mock-guardian-' + Date.now(),
                         guardianName: emergencyContactName,
                         guardianPhone: emergencyContactPhone,
                         relationship: emergencyContactRelationship || 'Other'
@@ -146,12 +115,41 @@ const registerUser = async (req, res, next) => {
 
                 res.status(201).json({
                     success: true,
-                    message: 'User registered successfully (Development Mode - No DB)',
+                    message: 'User registered successfully',
                     data: responseData
                 });
-            } else {
-                throw dbError;
+            } catch (dbError) {
+                next(dbError);
             }
+        } else {
+            // Development mode: Instant mock registration
+            const mockToken = 'mock-token-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const mockUserId = 'mock-user-' + email.split('@')[0] + '-' + Date.now();
+            
+            const responseData = {
+                token: mockToken,
+                user: {
+                    userId: mockUserId,
+                    fullName: fullName,
+                    email: email,
+                    phone: phone
+                }
+            };
+
+            if (emergencyContactName && emergencyContactPhone) {
+                responseData.guardian = {
+                    guardianId: 'mock-guardian-' + Date.now(),
+                    guardianName: emergencyContactName,
+                    guardianPhone: emergencyContactPhone,
+                    relationship: emergencyContactRelationship || 'Other'
+                };
+            }
+
+            res.status(201).json({
+                success: true,
+                message: 'User registered successfully (Development Mode)',
+                data: responseData
+            });
         }
     } catch (err) {
         next(err);
@@ -180,56 +178,56 @@ const loginUser = async (req, res, next) => {
             throw new Error('Password must be at least 6 characters');
         }
 
-        try {
-            // Try to authenticate with MongoDB
-            const user = await User.findOne({ email });
-            if (!user || !user.isActive) {
-                res.status(401);
-                throw new Error('Invalid credentials');
-            }
+        // Check if database is enabled
+        const isDBEnabled = String(process.env.ENABLE_DB || '').toLowerCase() === 'true';
 
-            const isMatch = await user.comparePassword(password);
-            if (!isMatch) {
-                res.status(401);
-                throw new Error('Invalid credentials');
-            }
+        if (isDBEnabled) {
+            // Database mode: Authenticate with MongoDB
+            try {
+                const user = await User.findOne({ email });
+                if (!user || !user.isActive) {
+                    res.status(401);
+                    throw new Error('Invalid credentials');
+                }
 
-            user.lastLogin = new Date();
-            await user.save();
+                const isMatch = await user.comparePassword(password);
+                if (!isMatch) {
+                    res.status(401);
+                    throw new Error('Invalid credentials');
+                }
 
-            const token = generateToken(user._id, user.email);
+                user.lastLogin = new Date();
+                await user.save();
 
-            await logActivity(user._id, 'login', { ip: req.ip });
+                const token = generateToken(user._id, user.email);
 
-            res.status(200).json({
-                success: true,
-                message: 'Logged in successfully',
-                data: { token, user }
-            });
-        } catch (dbError) {
-            // If database is not connected, allow login with any valid email/password
-            if (dbError.message.includes('Cannot read properties') || 
-                dbError.message.includes('User.findOne') ||
-                dbError.name === 'MongooseError' ||
-                !process.env.ENABLE_DB || process.env.ENABLE_DB === 'false') {
-                
-                // Development mode: Accept any valid email/password combination
-                const mockToken = 'mock-token-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-                const mockUser = {
-                    userId: 'mock-user-' + email.split('@')[0] + '-' + Date.now(),
-                    fullName: email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1),
-                    email: email,
-                    phone: '9876543210'
-                };
-                
+                await logActivity(user._id, 'login', { ip: req.ip });
+
                 res.status(200).json({
                     success: true,
-                    message: 'Logged in successfully (Development Mode - No DB)',
-                    data: { token: mockToken, user: mockUser }
+                    message: 'Logged in successfully',
+                    data: { token, user }
                 });
-            } else {
-                throw dbError;
+            } catch (dbError) {
+                next(dbError);
             }
+        } else {
+            // Development mode: Instant mock authentication
+            // Accept any valid email and password (6+ characters)
+            const mockToken = 'mock-token-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+            const fullName = email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1);
+            const mockUser = {
+                userId: 'mock-user-' + email.split('@')[0] + '-' + Date.now(),
+                fullName: fullName,
+                email: email,
+                phone: '9876543210'
+            };
+            
+            res.status(200).json({
+                success: true,
+                message: 'Logged in successfully (Development Mode)',
+                data: { token: mockToken, user: mockUser }
+            });
         }
     } catch (err) {
         next(err);
@@ -247,26 +245,26 @@ const logoutUser = async (req, res, next) => {
 
 const getCurrentUser = async (req, res, next) => {
     try {
-        try {
+        // Check if database is enabled
+        const isDBEnabled = String(process.env.ENABLE_DB || '').toLowerCase() === 'true';
+
+        if (isDBEnabled) {
+            // Database mode: Get user from MongoDB
             const user = await User.findById(req.user.userId);
             if (!user) {
                 res.status(404);
                 throw new Error('User not found');
             }
             res.status(200).json({ success: true, message: 'User fetched', data: user });
-        } catch (dbError) {
-            // If database is not connected, return mock user from token
-            if (!process.env.ENABLE_DB || process.env.ENABLE_DB === 'false') {
-                const mockUser = {
-                    userId: req.user.userId,
-                    fullName: 'Test User',
-                    email: req.user.email,
-                    phone: '9876543210'
-                };
-                res.status(200).json({ success: true, message: 'User fetched (Test Mode)', data: mockUser });
-            } else {
-                throw dbError;
-            }
+        } else {
+            // Development mode: Return mock user instantly
+            const mockUser = {
+                userId: req.user.userId,
+                fullName: req.user.email.split('@')[0].charAt(0).toUpperCase() + req.user.email.split('@')[0].slice(1),
+                email: req.user.email,
+                phone: '9876543210'
+            };
+            res.status(200).json({ success: true, message: 'User fetched (Development Mode)', data: mockUser });
         }
     } catch (err) {
         next(err);
