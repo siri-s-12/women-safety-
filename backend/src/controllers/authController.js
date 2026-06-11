@@ -7,6 +7,29 @@ const generateToken = (userId, email) => {
     return jwt.sign({ userId, email }, process.env.JWT_SECRET, { expiresIn: '7d' });
 };
 
+const mockUserStore = {};
+
+const normalizeEmailKey = (email) => email.trim().toLowerCase();
+
+const getMockUser = (email) => {
+    return mockUserStore[normalizeEmailKey(email)];
+};
+
+const createMockUser = ({ email, fullName, phone }) => {
+    const normalizedEmail = normalizeEmailKey(email);
+    const userId = `mock-user-${normalizedEmail.replace(/[^a-z0-9]/g, '-')}`;
+    const createdUser = {
+        userId,
+        fullName: fullName || normalizedEmail.split('@')[0].charAt(0).toUpperCase() + normalizedEmail.split('@')[0].slice(1),
+        email: normalizedEmail,
+        phone: phone || '9876543210',
+        termsAcceptedAt: new Date(),
+        isActive: true
+    };
+    mockUserStore[normalizedEmail] = createdUser;
+    return createdUser;
+};
+
 const registerUser = async (req, res, next) => {
     try {
         const { 
@@ -123,22 +146,25 @@ const registerUser = async (req, res, next) => {
             }
         } else {
             // Development mode: Instant mock registration
-            const mockUserId = 'mock-user-' + email.split('@')[0] + '-' + Date.now();
-            const mockToken = generateToken(mockUserId, email);
+            const existingMockUser = getMockUser(email);
+            if (existingMockUser) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'User already exists with this email in development mode'
+                });
+            }
+
+            const mockUser = createMockUser({ email, fullName, phone });
+            const mockToken = generateToken(mockUser.userId, mockUser.email);
             
             const responseData = {
                 token: mockToken,
-                user: {
-                    userId: mockUserId,
-                    fullName: fullName,
-                    email: email,
-                    phone: phone
-                }
+                user: mockUser
             };
 
             if (emergencyContactName && emergencyContactPhone) {
                 responseData.guardian = {
-                    guardianId: 'mock-guardian-' + Date.now(),
+                    guardianId: `mock-guardian-${Date.now()}`,
                     guardianName: emergencyContactName,
                     guardianPhone: emergencyContactPhone,
                     relationship: emergencyContactRelationship || 'Other'
@@ -214,15 +240,11 @@ const loginUser = async (req, res, next) => {
         } else {
             // Development mode: Instant mock authentication
             // Accept any valid email and password (6+ characters)
-            const mockUserId = 'mock-user-' + email.split('@')[0] + '-' + Date.now();
-            const mockToken = generateToken(mockUserId, email);
-            const fullName = email.split('@')[0].charAt(0).toUpperCase() + email.split('@')[0].slice(1);
-            const mockUser = {
-                userId: mockUserId,
-                fullName: fullName,
-                email: email,
-                phone: '9876543210'
-            };
+            let mockUser = getMockUser(email);
+            if (!mockUser) {
+                mockUser = createMockUser({ email });
+            }
+            const mockToken = generateToken(mockUser.userId, mockUser.email);
             
             res.status(200).json({
                 success: true,
@@ -259,12 +281,10 @@ const getCurrentUser = async (req, res, next) => {
             res.status(200).json({ success: true, message: 'User fetched', data: user });
         } else {
             // Development mode: Return mock user instantly
-            const mockUser = {
-                userId: req.user.userId,
-                fullName: req.user.email.split('@')[0].charAt(0).toUpperCase() + req.user.email.split('@')[0].slice(1),
-                email: req.user.email,
-                phone: '9876543210'
-            };
+            let mockUser = getMockUser(req.user.email);
+            if (!mockUser) {
+                mockUser = createMockUser({ email: req.user.email });
+            }
             res.status(200).json({ success: true, message: 'User fetched (Development Mode)', data: mockUser });
         }
     } catch (err) {
